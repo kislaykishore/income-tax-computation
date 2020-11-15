@@ -31,7 +31,7 @@ def compute_txn_df(args):
     for _, row in metadata_df.iterrows():
         long_term_days_dict[row.Entity] = row.LongTermDays
     df["Date"] = pd.to_datetime(df["Date"], format="%d-%b-%Y")
-    df = df.sort_values("Date").reset_index(drop=True)
+    df = df.sort_values(["Date", "Entity", "Units"], ascending=(True, True, False)).reset_index(drop=True)
 
     start_year = int(args["fy_year"].split("-")[0])
     start_date = datetime.strptime("{0}-04-01".format(start_year), "%Y-%m-%d")
