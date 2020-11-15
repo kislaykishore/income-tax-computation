@@ -3,20 +3,33 @@ import argparse
 from datetime import datetime
 from collections import defaultdict 
 """
+Transaction CSV file format:
 CSV column separator: ","
 CSV columns expected:
 <Entity>: Name of MF/Equity
 <Units>: Units purchased. Should be negative if units are sold
 <Price>: Price at which the units were purchased/sold. Must be positive
 <Date>: Transaction Date, format: dd-mon-yyyy e.g. 01-Jan-1990
+
+Metadata file format:
+CSV column separator: ","
+CSV columns expected:
+<Entity>: Name of MF/Equity
+<LongTermDays>: Number of days after which the long term capital gains is applicable
+<FundType>: One of debt, equity, commodity
+
+CII Table file format:
+CSV column separator: ","
+<FYYear>: Financial year e.g. 2018-19
+<CII>: CII number e.g. 280
 """
 
 def compute_txn_df(args):
     df = pd.read_csv(args["txn_file"])
     metadata_df = pd.read_csv(args["metadata_file"])
-    metadata_dict = {}
+    long_term_days_dict = {}
     for _, row in metadata_df.iterrows():
-        metadata_dict[row.Entity] = row.LongTermDays
+        long_term_days_dict[row.Entity] = row.LongTermDays
     df["Date"] = pd.to_datetime(df["Date"], format="%d-%b-%Y")
     df = df.sort_values("Date").reset_index(drop=True)
 
@@ -56,12 +69,12 @@ def compute_txn_df(args):
                         continue
 
                     days_delta = (sale_row.Date - buy_row.Date).days
-                    is_long_term = days_delta > metadata_dict[sale_row.Entity]
+                    is_long_term = days_delta > long_term_days_dict[sale_row.Entity]
                     txn_df = txn_df.append({'Entity': sale_row.Entity, 'txn_type': 'long_term' if is_long_term else 'short_term',
                             'Units': units_consumed,
                             "SalePrice": sale_row.Price, "FairPrice" : buy_row.Price,
                             'CostOfAcquisition': (buy_row.Price * units_consumed), 'FairValue': (sale_row.Price * units_consumed),
-                            'Date': sale_row.Date}, ignore_index=True)
+                            'Date': sale_row.Date, 'BuyDate': buy_row.Date}, ignore_index=True)
 
 
             if df.loc[sale_index, "Units"] < -0.001:
@@ -104,6 +117,7 @@ def construct_parser():
     parser.add_argument("--fy_year", help="FY Year e.g. 2019-2020", required=True)
     parser.add_argument("--output_file", help="Output File")
     parser.add_argument("--profit_intervals", nargs="+", help="Profit intervals")
+    parser.add_argument("--cii_file", help="CII Table", required=True)
     return parser
 
 def parse_args():
@@ -112,8 +126,28 @@ def parse_args():
     args = preprocess_args(args)
     return args
 
+def validate_input(args):
+    # Validate Transaction dataframe
+    txn_df = pd.read_csv(args["txn_file"])
+    txn_col_names = ['Entity', 'Units', 'Price', 'Date']
+    validate_df('Transaction', txn_df, txn_col_names)
+    
+    metadata_df = pd.read_csv(args["metadata_file"])
+    metadata_col_names = ['Entity', 'LongTermDays', 'FundType']
+    validate_df('Metadata', metadata_df, metadata_col_names)
+
+    cii_df = pd.read_csv(args["cii_file"])
+    cii_col_names = ['FYYear', 'CII']
+    validate_df('CII Table', cii_df, cii_col_names)
+
+def validate_df(csv_name, df, expected_cols):
+    diff = set(expected_cols) - set(df.columns)
+    if diff:
+        raise ValueError("{0} CSV doesn't have the following columns: {1}".format(csv_name, str(diff)))
+
 if __name__ == "__main__":
     args = parse_args()
+    validate_input(args)
     txn_df = compute_txn_df(args)
     if 'output_file' in args:
         txn_df.to_csv(args['output_file'], float_format='%.2f')
